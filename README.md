@@ -83,10 +83,10 @@ For each configured instance, the app:
 2. Locally keeps entries matching error-related indicators (or matching text lines and their continuation lines).
 3. Splits the filtered text into candidate chunks.
 4. Uses the configured embedding model through Ollama to embed the search query and candidate text; the app computes cosine similarity and selects up to `MaxResults`.
-5. Sends the selected original text chunks to the generation model to create partial summaries, and combines them when there is more than one.
+5. Groups every locally filtered log record by exact exception/error type and message and counts occurrences in code. Semantic search selects excerpts for context, and Ollama writes the brief overall summary. Counts do not depend on the retrieved excerpts or the model's ability to count.
 6. Saves the result as `<ApplicationName>.txt`.
 
-The local filter is error-focused, so this is not a summary of every log entry. Semantic retrieval further narrows the filtered content to the best matches for the configured query. JSON input is expected to be a single valid JSON object or array; plain-text logs are also supported.
+The local filter is error-focused, so the issue counts cover matching filtered records, not necessarily every entry in the input log. Repeated issues are grouped when their exception/error type and message match (case-insensitively, with whitespace normalized); different messages remain separate. Semantic retrieval narrows contextual excerpts for the overall summary, but does not reduce the counted issue inventory. JSON input is expected to be a single valid JSON object or array; plain-text logs are also supported.
 
 ## Privacy
 
