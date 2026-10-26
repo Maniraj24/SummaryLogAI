@@ -73,7 +73,7 @@ From the project directory:
 dotnet run
 ```
 
-The app looks for `appsettings.json` in the current working directory, then in the application directory. It processes instances in order, reports each summary path, and continues to later instances if one fails. The process exits unsuccessfully if any instance failed.
+The app looks for `appsettings.json` in the current working directory, then in the application directory. It processes instances in order, logs embedding progress and when summary generation starts and completes with the configured Ollama model, reports each summary path, and continues to later instances if one fails. The process exits unsuccessfully if any instance failed.
 
 ## Processing overview
 
@@ -83,10 +83,10 @@ For each configured instance, the app:
 2. Locally keeps entries matching error-related indicators (or matching text lines and their continuation lines).
 3. Splits the filtered text into candidate chunks.
 4. Uses the configured embedding model through Ollama to embed the search query and candidate text; the app computes cosine similarity and selects up to `MaxResults`.
-5. Groups every locally filtered log record by exact exception/error type and message and counts occurrences in code. Semantic search selects excerpts for context, and Ollama writes the brief overall summary. Counts do not depend on the retrieved excerpts or the model's ability to count.
+5. Groups every locally filtered log record by exception/error type and message and counts occurrences in code. The application renders the highest-frequency issue groups and counts directly. Semantic search selects excerpts for context, and Ollama writes a brief factual overview; the report adds cautious, evidence-limited impact, cause, and follow-up sections.
 6. Saves the result as `<ApplicationName>.txt`.
 
-The local filter is error-focused, so the issue counts cover matching filtered records, not necessarily every entry in the input log. Repeated issues are grouped when their exception/error type and message match (case-insensitively, with whitespace normalized); different messages remain separate. Semantic retrieval narrows contextual excerpts for the overall summary, but does not reduce the counted issue inventory. JSON input is expected to be a single valid JSON object or array; plain-text logs are also supported.
+The local filter is error-focused, so the issue counts cover matching filtered records, not necessarily every entry in the input log or unique requests. Repeated issues are grouped when their exception/error type and message match (case-insensitively, with whitespace normalized); for plain-text entries, the message is taken from the log header rather than continuation metadata. The report shows the most frequent issue groups and counts computed by the application; semantic retrieval narrows contextual excerpts for the generated overview, but does not reduce the counted issue inventory. Common patient, user, request, and trace identifiers are redacted from the report and model context. Ollama is asked for a schema-constrained JSON overview, which the application validates; cause, impact, action, and data-limit sections are rendered separately to avoid presenting model speculation as fact. Output stopped at the model's token limit is rejected rather than saved as a completed report. Review recommendations and conclusions against the source logs. JSON input is expected to be a single valid JSON object or array; plain-text logs are also supported.
 
 ## Privacy
 
