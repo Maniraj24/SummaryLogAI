@@ -2,11 +2,17 @@ namespace LogSummaryAI.Model;
 
 public sealed class AppConfiguration
 {
-    public string InputLogPath { get; set; } = "";
-    public string OutputSummaryPath { get; set; } = "";
+    public List<ApplicationInstanceConfiguration> Instances { get; set; } = [];
     public int MaxChunkCharacters { get; set; } = 12000;
     public OllamaConfiguration Ollama { get; set; } = new();
     public SemanticSearchConfiguration SemanticSearch { get; set; } = new();
+}
+
+public sealed class ApplicationInstanceConfiguration
+{
+    public string ApplicationName { get; set; } = "";
+    public string InputLogPath { get; set; } = "";
+    public string OutputSummaryPath { get; set; } = "";
 }
 
 public sealed class OllamaConfiguration

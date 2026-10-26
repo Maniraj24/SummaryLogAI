@@ -33,20 +33,54 @@ internal static class Program
         // Load paths and Ollama settings before reading the log or making network requests.
         var configurationPath = FindConfigurationPath();
         var configuration = await LoadConfigurationAsync(configurationPath);
-        var inputPath = ResolvePath(configuration.InputLogPath);
-        var outputPath = ResolvePath(configuration.OutputSummaryPath);
+        using var httpClient = CreateHttpClient(configuration.Ollama);
+        var failures = new List<Exception>();
+        foreach (var instance in configuration.Instances)
+        {
+            try
+            {
+                await SummarizeInstanceAsync(httpClient, configuration, instance);
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(
+                    $"Failed to summarize '{instance.ApplicationName}': {exception.Message}");
+                failures.Add(exception);
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Failed to summarize {failures.Count} of {configuration.Instances.Count} application instance(s).",
+                new AggregateException(failures));
+        }
+    }
+
+    private static async Task SummarizeInstanceAsync(
+        HttpClient httpClient,
+        AppConfiguration configuration,
+        ApplicationInstanceConfiguration instance)
+    {
+        var inputPath = ResolvePath(instance.InputLogPath);
+        var outputPath = ResolvePath(instance.OutputSummaryPath);
 
         if (!File.Exists(inputPath))
         {
-            throw new FileNotFoundException($"Input log file was not found: {inputPath}");
+            throw new FileNotFoundException(
+                $"Input log file for '{instance.ApplicationName}' was not found: {inputPath}");
         }
 
+        Console.WriteLine($"Summarizing '{instance.ApplicationName}'...");
         var logContents = await File.ReadAllTextAsync(inputPath);
         var relevantEntries = RetrieveErrorAndExceptionEntries(logContents);
         if (relevantEntries.Count == 0)
         {
             const string noErrorsFound = "No error or exception entries were found in the input log.";
-            var summaryPath = await SaveSummaryAsync(outputPath, noErrorsFound);
+            var summaryPath = await SaveSummaryAsync(
+                outputPath,
+                instance.ApplicationName,
+                noErrorsFound);
             Console.WriteLine(noErrorsFound);
             Console.WriteLine($"Summary saved to: {summaryPath}");
             return;
@@ -57,8 +91,6 @@ internal static class Program
         Console.WriteLine(
             $"Found {relevantEntries.Count} candidate entries in {candidateChunks.Count} chunk(s).");
 
-        // Reuse one client for embedding retrieval and summary generation.
-        using var httpClient = CreateHttpClient(configuration.Ollama);
         var chunks = await SearchRelevantChunksAsync(
             httpClient,
             configuration.SemanticSearch,
@@ -67,8 +99,7 @@ internal static class Program
             $"Semantic search selected {chunks.Count} chunk(s) using '{configuration.SemanticSearch.EmbeddingModel}'.");
 
         var summary = await SummarizeAsync(httpClient, configuration.Ollama, chunks);
-        var savedSummaryPath = await SaveSummaryAsync(outputPath, summary);
-
+        var savedSummaryPath = await SaveSummaryAsync(outputPath, instance.ApplicationName, summary);
         Console.WriteLine($"Summary saved to: {savedSummaryPath}");
     }
 
@@ -107,14 +138,34 @@ internal static class Program
 
     private static void ValidateConfiguration(AppConfiguration configuration)
     {
-        if (string.IsNullOrWhiteSpace(configuration.InputLogPath))
+        if (configuration.Instances is null || configuration.Instances.Count == 0)
         {
-            throw new InvalidDataException("InputLogPath must be configured in appsettings.json.");
+            throw new InvalidDataException("At least one instance must be configured in appsettings.json.");
         }
 
-        if (string.IsNullOrWhiteSpace(configuration.OutputSummaryPath))
+        foreach (var instance in configuration.Instances)
         {
-            throw new InvalidDataException("OutputSummaryPath must be configured in appsettings.json.");
+            if (string.IsNullOrWhiteSpace(instance.ApplicationName) ||
+                instance.ApplicationName is "." or ".." ||
+                instance.ApplicationName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                instance.ApplicationName.Contains('/') ||
+                instance.ApplicationName.Contains('\\'))
+            {
+                throw new InvalidDataException(
+                    "Each instance must have a valid ApplicationName for its summary file name.");
+            }
+
+            if (string.IsNullOrWhiteSpace(instance.InputLogPath))
+            {
+                throw new InvalidDataException(
+                    $"InputLogPath must be configured for '{instance.ApplicationName}'.");
+            }
+
+            if (string.IsNullOrWhiteSpace(instance.OutputSummaryPath))
+            {
+                throw new InvalidDataException(
+                    $"OutputSummaryPath must be configured for '{instance.ApplicationName}'.");
+            }
         }
 
         if (configuration.MaxChunkCharacters <= 0)
@@ -284,17 +335,16 @@ internal static class Program
         return partialSummaries;
     }
 
-    private static async Task<string> SaveSummaryAsync(string outputPath, string summary)
+    private static async Task<string> SaveSummaryAsync(
+        string outputDirectory,
+        string applicationName,
+        string summary)
     {
-        var fullOutputPath = Path.GetFullPath(outputPath);
-        if (Directory.Exists(fullOutputPath) || string.IsNullOrEmpty(Path.GetExtension(fullOutputPath)))
-        {
-            fullOutputPath = Path.Combine(fullOutputPath, "summary.txt");
-        }
-
-        Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
-        await File.WriteAllTextAsync(fullOutputPath, summary.Trim() + Environment.NewLine, Encoding.UTF8);
-        return fullOutputPath;
+        var fullOutputDirectory = Path.GetFullPath(outputDirectory);
+        Directory.CreateDirectory(fullOutputDirectory);
+        var summaryPath = Path.Combine(fullOutputDirectory, $"{applicationName}.txt");
+        await File.WriteAllTextAsync(summaryPath, summary.Trim() + Environment.NewLine, Encoding.UTF8);
+        return summaryPath;
     }
 
     private static List<string> RetrieveErrorAndExceptionEntries(string logContents)
